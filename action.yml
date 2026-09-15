@@ -72,7 +72,9 @@ inputs:
     required: false
     default: ${{ github.token }}
   ocr_version:
-    description: npm version spec for @alibaba-group/open-code-review (v1.9.6 or newer required).
+    description: >-
+      npm version spec for @alibaba-group/open-code-review (v1.9.6 or newer required),
+      or "source" to build the CLI from this action checkout.
     required: false
     default: latest
   review_concurrency:
@@ -444,12 +446,36 @@ runs:
         esac
         echo "STREAM_PROGRESS=$NORMALIZED_STREAM_PROGRESS" >> "$GITHUB_ENV"
 
+    - name: Setup Go for source build
+      if: inputs.ocr_version == 'source'
+      uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+      with:
+        go-version-file: ${{ github.action_path }}/go.mod
+        cache: false
+
     - name: Install OpenCodeReview
       shell: bash
       env:
         OCR_VERSION: ${{ inputs.ocr_version }}
       run: |
-        npm install -g "@alibaba-group/open-code-review@${OCR_VERSION}"
+        if [ "$OCR_VERSION" = "source" ]; then
+          install_dir="$RUNNER_TEMP/open-code-review-bin"
+          mkdir -p "$install_dir"
+          build_version="1.12.1+remy"
+          build_commit="${GITHUB_ACTION_REF:-fork}"
+          build_date="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          (
+            cd "$GITHUB_ACTION_PATH"
+            go build -trimpath \
+              -ldflags "-s -w -X main.Version=$build_version -X main.GitCommit=$build_commit -X main.BuildDate=$build_date" \
+              -o "$install_dir/ocr" \
+              ./cmd/opencodereview
+          )
+          export PATH="$install_dir:$PATH"
+          echo "$install_dir" >> "$GITHUB_PATH"
+        else
+          npm install -g "@alibaba-group/open-code-review@${OCR_VERSION}"
+        fi
         echo "OpenCodeReview installed:"
         OCR_VERSION_OUTPUT="$(ocr version 2>/dev/null)" || {
           echo "::error::Unable to read the installed OpenCodeReview version"
